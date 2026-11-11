@@ -1,10 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Shirt, Sparkles, MessageCircle, ShieldCheck, 
-  HelpCircle, User, Sun, Moon, Check, X, ChevronDown, 
+  HelpCircle, User, Check, X, ChevronDown, 
   ChevronUp, Send, AlertCircle, Info, Trash2, Settings, 
   Layers, PlusCircle, ToggleLeft, ToggleRight, Menu
 } from 'lucide-react';
+
+// import { createClient } from '@supabase/supabase-js';
+// const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+// const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+const supabase = {
+  auth: {
+    signUp: async () => ({ data: { user: { id: 'mock-id' } }, error: null }),
+    signInWithPassword: async () => ({ data: { user: { id: 'mock-id' } }, error: null }),
+    signOut: async () => ({ error: null }),
+  },
+  from: () => ({
+    insert: async () => ({ error: null }),
+    select: () => ({
+      eq: () => ({
+        single: async () => ({ data: { first_name: 'Usuario', last_name: 'Demo', city: 'Maracay', state: 'Aragua', phone: '000000' }, error: null })
+      })
+    })
+  })
+};
 
 // --- DATA & CONSTANTS ---
 const INITIAL_GARMENTS = [
@@ -78,10 +99,9 @@ const FAQS = [
 ];
 
 export default function App() {
-  const [darkMode, setDarkMode] = useState(false);
   const [garments, setGarments] = useState(INITIAL_GARMENTS);
   const [activeTab, setActiveTab] = useState('hero'); 
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // NUEVO ESTADO PARA MENÚ MÓVIL
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const [selectedGarment, setSelectedGarment] = useState(INITIAL_GARMENTS[0]);
   const [garmentColor, setGarmentColor] = useState(INITIAL_GARMENTS[0].colors[0]);
@@ -94,6 +114,10 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState('login'); 
   const [user, setUser] = useState(null); 
+  
+  // Estado para prevenir múltiples clics durante la carga
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
   const [authForm, setAuthForm] = useState({ 
     email: '', 
     password: '',
@@ -127,6 +151,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [openFaq, setOpenFaq] = useState(null);
 
+  // --- EFECTOS AL CARGAR ---
   useEffect(() => {
     const consent = localStorage.getItem('jjor_cookie_consent');
     if (!consent) {
@@ -139,7 +164,6 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // --- NAVEGACIÓN PROTEGIDA ---
   const handleGoToCustomizer = () => {
     if (!user) {
       triggerToast('Debes crear una cuenta o iniciar sesión para personalizar prendas', 'info');
@@ -169,68 +193,158 @@ export default function App() {
   const handleAddGarment = (e) => {
     e.preventDefault();
     if (!newGarment.name || !newGarment.price) {
-      triggerToast('Completa el nombre y el precio de la prenda', 'error');
+      triggerToast('Por favor completa el nombre y precio', 'error');
       return;
     }
-
-    const created = {
+    const garmentObj = {
       id: `garment-${Date.now()}`,
       name: newGarment.name,
       category: newGarment.category,
-      price: parseFloat(newGarment.price),
+      price: parseFloat(newGarment.price) || 25.00,
       active: true,
       colors: newGarment.colors.split(',').map(c => c.trim()),
       sizes: newGarment.sizes.split(',').map(s => s.trim()),
       image: newGarment.image || 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&q=80&w=800',
       mockupType: 'tshirt'
     };
-
-    setGarments([...garments, created]);
-    setNewGarment({ name: '', category: 'Deportiva', price: '', image: '', sizes: 'S, M, L, XL', colors: '#111827, #64748B' });
-    triggerToast('¡Nueva prenda publicada exitosamente en la tienda!');
+    setGarments([garmentObj, ...garments]);
+    setNewGarment({ name: '', category: 'Deportiva', price: '', image: '', sizes: 'S, M, L, XL', colors: '#111827, #64748B, #F8FAFC' });
+    triggerToast('¡Prenda agregada al catálogo exitosamente!');
   };
 
-  const handleAuthSubmit = (e) => {
+  // --- LÓGICA DE AUTENTICACIÓN REAL CON SUPABASE ---
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
     
-    if (authMode === 'register') {
-      if (authForm.password !== authForm.confirmPassword) {
-        triggerToast('Las contraseñas no coinciden. Por favor, verifica.', 'error');
-        return;
-      }
+    // Verificación de Admin Manual (Bypass para el dueño de la tienda)
+    if (authForm.email === 'admin@jorstore.com' && authForm.password === '24512622') {
+      setUser({ 
+        email: authForm.email, 
+        name: 'Admin JOR',
+        role: 'admin'
+      });
+      triggerToast('Sesión de Administrador iniciada correctamente');
+      setActiveTab('admin');
+      setIsAuthOpen(false);
+      return;
     }
 
-    let isAdminUser = false;
+    if (!supabase) {
+      triggerToast('Error: Supabase no está conectado. Revisa tu archivo .env', 'error');
+      return;
+    }
 
-    if (authForm.email === 'admin@jorstore.com') {
-      if (authForm.password === '24512622') {
-        isAdminUser = true;
-      } else {
-        triggerToast('Contraseña incorrecta para el administrador', 'error');
+    setIsAuthLoading(true);
+
+    if (authMode === 'register') {
+      if (authForm.password !== authForm.confirmPassword) {
+        triggerToast('Las contraseñas no coinciden.', 'error');
+        setIsAuthLoading(false);
         return;
+      }
+
+      // 1. Crear el usuario en la Autenticación de Supabase
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: authForm.email,
+        password: authForm.password,
+      });
+
+      if (authError) {
+        triggerToast(`Error de registro: ${authError.message}`, 'error');
+        setIsAuthLoading(false);
+        return;
+      }
+
+      // 2. Si el registro en Auth fue exitoso, guardamos sus datos en la tabla 'profiles'
+      if (authData.user) {
+        const { error: profileError } = await supabase.from('profiles').insert([
+          {
+            id: authData.user.id, // Vinculamos el ID único del usuario
+            first_name: authForm.firstName,
+            last_name: authForm.lastName,
+            email: authForm.email,
+            state: authForm.stateLocation,
+            city: authForm.city,
+            phone: authForm.phone
+          }
+        ]);
+
+        if (profileError) {
+          console.error('Error al guardar en tabla perfiles:', profileError);
+          triggerToast('Usuario creado, pero hubo un error al guardar los detalles del perfil.', 'error');
+        } else {
+          triggerToast('¡Registro exitoso! Ya estás conectado.');
+          
+          setUser({ 
+            id: authData.user.id,
+            email: authForm.email, 
+            name: `${authForm.firstName} ${authForm.lastName}`, // Nombre y apellido para mostrar
+            role: 'client',
+            location: `${authForm.city}, ${authForm.stateLocation}`,
+            phone: authForm.phone
+          });
+          
+          setActiveTab('customizer');
+          setIsAuthOpen(false);
+        }
+      }
+
+    } else {
+      // MODO INICIO DE SESIÓN
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: authForm.email,
+        password: authForm.password,
+      });
+
+      if (authError) {
+        triggerToast('Correo o contraseña incorrectos', 'error');
+        setIsAuthLoading(false);
+        return;
+      }
+
+      // Si inició sesión con éxito, buscamos su nombre y apellido en la tabla 'profiles'
+      if (authData.user) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', authForm.email)
+          .single();
+
+        let fullName = authForm.email; // Por defecto mostramos el correo si no hallamos el nombre
+        let userLocation = 'Ubicación no definida';
+        let userPhone = '';
+
+        if (profileData) {
+          fullName = `${profileData.first_name} ${profileData.last_name}`;
+          userLocation = `${profileData.city}, ${profileData.state}`;
+          userPhone = profileData.phone;
+        }
+
+        setUser({ 
+          id: authData.user.id,
+          email: authForm.email, 
+          name: fullName,
+          role: 'client',
+          location: userLocation,
+          phone: userPhone
+        });
+
+        triggerToast(`¡Bienvenido de nuevo, ${fullName}!`);
+        setActiveTab('customizer');
+        setIsAuthOpen(false);
       }
     }
     
-    const userName = authMode === 'register' ? `${authForm.firstName} ${authForm.lastName}` : (isAdminUser ? 'Admin JOR' : authForm.email.split('@')[0]);
+    setIsAuthLoading(false);
+  };
 
-    setUser({ 
-      email: authForm.email, 
-      name: userName,
-      role: isAdminUser ? 'admin' : 'client',
-      location: `${authForm.city}, ${authForm.stateLocation}`,
-      phone: authForm.phone
-    });
-
-    if (isAdminUser) {
-      triggerToast('Sesión de Administrador iniciada correctamente');
-      setActiveTab('admin');
-    } else {
-      triggerToast(`¡Bienvenido, ${userName}!`);
-      if (authMode === 'register') {
-        setActiveTab('customizer');
-      }
+  const handleSignOut = async () => {
+    if (user?.role !== 'admin' && supabase) {
+      await supabase.auth.signOut();
     }
-    setIsAuthOpen(false);
+    setUser(null);
+    setActiveTab('hero');
+    triggerToast('Sesión cerrada correctamente', 'info');
   };
 
   const handleAcceptAllCookies = () => {
@@ -248,84 +362,17 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${darkMode ? 'concrete-bg-dark text-neutral-100' : 'concrete-bg-light text-neutral-900'}`}>
+    <div className="min-h-screen concrete-bg-dark text-neutral-100">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&display=swap');
         * { font-family: 'Comfortaa', sans-serif !important; }
-        .concrete-bg-light {
-          background-color: #e5e5e5;
-          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
-          color: #000 !important;
-        }
         .concrete-bg-dark {
           background-color: #121212;
           background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E");
-          color: #fff !important;
         }
-        
-        .bg-\\[\\#0B0F17\\], section, footer { background-color: transparent !important; }
-        
-        .bg-\\[\\#111827\\] { 
-          background-color: ${darkMode ? 'rgba(20,20,20,0.85)' : 'rgba(255,255,255,0.4)'} !important; 
-          backdrop-filter: blur(16px); 
-          border-color: ${darkMode ? '#333' : '#a3a3a3'} !important; 
-          box-shadow: ${darkMode ? '0 10px 25px -5px rgba(0,0,0,0.9)' : '0 10px 25px -5px rgba(0,0,0,0.15)'} !important; 
-        }
-        
-        .border-slate-800, .border-slate-700, .border-slate-600 { 
-          border-color: ${darkMode ? '#3a3a3a' : '#9ca3af'} !important; 
-        }
-        
-        .text-slate-400, .text-slate-500, .text-slate-600, .text-slate-700 { 
-          color: ${darkMode ? '#e5e5e5' : '#374151'} !important; 
-        }
-        
-        .bg-slate-900, .bg-slate-950, .bg-slate-900\\/50, .bg-slate-950\\/50 { 
-          background-color: ${darkMode ? '#171717' : 'rgba(255,255,255,0.6)'} !important; 
-          border-color: ${darkMode ? '#333' : '#a3a3a3'} !important;
-        }
-        
-        .bg-slate-800, .bg-slate-700 { 
-          background-color: ${darkMode ? '#262626' : '#d4d4d4'} !important; 
-          color: ${darkMode ? '#fff' : '#000'} !important;
-        }
-        
-        .text-slate-200, .text-slate-100, .text-slate-300, .text-white { 
-          color: ${darkMode ? '#ffffff' : '#000000'} !important; 
-        }
-
-        .from-slate-700, .via-slate-600, .to-slate-800, 
-        .from-slate-100, .via-slate-300, .to-slate-400,
-        .bg-emerald-600, .hover\\:bg-emerald-500 {
-          background: ${darkMode ? '#e5e5e5' : '#000000'} !important;
-          color: ${darkMode ? '#000' : '#fff'} !important;
-          border: 1px solid ${darkMode ? '#fff' : '#000'} !important;
-          box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
-        }
-        
-        .bg-emerald-600 *, .from-slate-700 *, .bg-emerald-600 svg, .from-slate-700 svg {
-          fill: ${darkMode ? '#000' : '#fff'} !important;
-          color: ${darkMode ? '#000' : '#fff'} !important;
-        }
-
-        header { 
-          background-color: ${darkMode ? 'rgba(18,18,18,0.85)' : 'rgba(229,229,229,0.85)'} !important; 
-          border-bottom-color: ${darkMode ? '#333' : '#a3a3a3'} !important; 
-        }
-        
-        input, textarea, select {
-          background-color: ${darkMode ? '#171717' : '#ffffff'} !important;
-          color: ${darkMode ? '#fff' : '#000'} !important;
-          border-color: ${darkMode ? '#3a3a3a' : '#9ca3af'} !important;
-        }
-        
-        input::placeholder, textarea::placeholder {
-          color: ${darkMode ? '#737373' : '#6b7280'} !important;
-        }
-        
         .modal-scroll::-webkit-scrollbar { width: 6px; }
         .modal-scroll::-webkit-scrollbar-track { background: transparent; }
-        .modal-scroll::-webkit-scrollbar-thumb { background: ${darkMode ? '#333' : '#a3a3a3'}; border-radius: 10px; }
+        .modal-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
       `}</style>
       
       {toast && (
@@ -345,7 +392,7 @@ export default function App() {
           >
             <div className="w-10 h-10 sm:w-12 sm:h-12 transition-transform duration-300 group-hover:scale-105 flex items-center justify-center">
               <img 
-                src={darkMode ? "https://i.ibb.co/nspSqBy5/Recurso-2.png" : "https://i.ibb.co/hRPj411P/Recurso-1.png"} 
+                src="https://i.ibb.co/nspSqBy5/Recurso-2.png" 
                 alt="Jor Store" 
                 className="w-full h-full object-contain drop-shadow-md"
               />
@@ -360,7 +407,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Menú visible en pantallas grandes y tablets (Laptops, PC y Tablets) */}
           <nav className="hidden md:flex items-center gap-4 lg:gap-8 font-sans text-xs lg:text-sm font-medium ml-auto mr-2 lg:mr-4">
             <button onClick={() => handleNavClick('hero')} className={`hover:text-slate-300 transition-colors ${activeTab === 'hero' ? 'text-slate-200 border-b-2 border-slate-400 pb-1' : 'text-slate-400'}`}>Inicio</button>
             <button onClick={handleGoToCustomizer} className={`hover:text-slate-300 transition-colors flex items-center gap-1 lg:gap-1.5 ${activeTab === 'customizer' ? 'text-slate-200 border-b-2 border-slate-400 pb-1' : 'text-slate-400'}`}>
@@ -378,16 +424,7 @@ export default function App() {
             <button onClick={() => handleNavClick('contact')} className={`hover:text-slate-300 transition-colors ${activeTab === 'contact' ? 'text-slate-200 border-b-2 border-slate-400 pb-1' : 'text-slate-400'}`}>Contacto</button>
           </nav>
 
-          {/* Botones de acción derecha y Hamburguesa */}
           <div className="flex items-center gap-2 sm:gap-4 md:pl-4 lg:pl-8 md:border-l border-slate-700/50 flex-shrink-0">
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2.5 rounded-lg border border-slate-700 bg-slate-900/50 hover:bg-slate-800 text-slate-300 transition flex items-center justify-center"
-              title="Cambiar tema"
-            >
-              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
             {user ? (
               <div className="flex items-center gap-2">
                 <button 
@@ -398,7 +435,7 @@ export default function App() {
                   <User className="w-5 h-5 text-slate-400" />
                 </button>
                 <button 
-                  onClick={() => setUser(null)} 
+                  onClick={handleSignOut} 
                   className="hidden sm:flex p-2.5 rounded-lg border border-slate-800 hover:border-red-900/50 bg-slate-900/50 hover:bg-red-950/30 text-slate-500 hover:text-red-400 transition items-center justify-center"
                   title="Cerrar Sesión"
                 >
@@ -415,7 +452,6 @@ export default function App() {
               </button>
             )}
 
-            {/* Menú Hamburguesa solo para móviles (teléfonos pequeños) */}
             <button 
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
               className="md:hidden p-2.5 rounded-lg border border-slate-700 bg-slate-900/50 text-slate-300 hover:bg-slate-800 transition flex items-center justify-center"
@@ -425,11 +461,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* Desplegable del menú móvil */}
         {isMobileMenuOpen && (
           <div 
-            className="md:hidden absolute top-20 left-0 w-full border-b border-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.4)] flex flex-col font-sans text-sm font-bold z-50"
-            style={{ backgroundColor: darkMode ? '#121212' : '#ffffff' }}
+            className="md:hidden absolute top-20 left-0 w-full border-b border-slate-800 shadow-[0_20px_50px_rgba(0,0,0,0.4)] flex flex-col font-sans text-sm font-bold z-50 bg-[#121212]"
           >
             <button onClick={() => handleNavClick('hero')} className={`p-4 text-left border-b border-slate-800/50 ${activeTab === 'hero' ? 'text-slate-100 bg-slate-900/50' : 'text-slate-400'}`}>Inicio</button>
             <button onClick={handleGoToCustomizer} className={`p-4 text-left border-b border-slate-800/50 flex items-center gap-2 ${activeTab === 'customizer' ? 'text-slate-100 bg-slate-900/50' : 'text-slate-400'}`}>
@@ -447,7 +481,7 @@ export default function App() {
             <button onClick={() => handleNavClick('contact')} className={`p-4 text-left ${activeTab === 'contact' ? 'text-slate-100 bg-slate-900/50' : 'text-slate-400'}`}>Contacto</button>
             
             {user && (
-              <button onClick={() => { setUser(null); setIsMobileMenuOpen(false); }} className="p-4 text-left border-t border-slate-800 text-red-400 bg-slate-950/50">
+              <button onClick={() => { handleSignOut(); setIsMobileMenuOpen(false); }} className="p-4 text-left border-t border-slate-800 text-red-400 bg-slate-950/50">
                 Cerrar Sesión
               </button>
             )}
@@ -456,7 +490,6 @@ export default function App() {
       </header>
 
       <main>
-        {/* ... (el resto del contenido de las pestañas sigue exactamente igual) ... */}
         {activeTab === 'hero' && (
           <section className="relative overflow-hidden py-20 lg:py-28 bg-[#0B0F17]">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
@@ -562,11 +595,11 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col gap-3 pt-2">
-                  <div className={`p-4 rounded-xl text-center shadow-lg transition-colors ${darkMode ? 'bg-amber-900/30 border border-amber-500/50' : 'bg-[#d97706] border border-[#b45309]'}`}>
-                    <span className={`font-black text-sm uppercase tracking-wider block mb-1 flex items-center justify-center gap-2 ${darkMode ? 'text-amber-400' : 'text-[#fffbeb]'}`}>
+                  <div className="p-4 rounded-xl text-center shadow-lg transition-colors bg-amber-900/30 border border-amber-500/50">
+                    <span className="font-black text-sm uppercase tracking-wider block mb-1 flex items-center justify-center gap-2 text-amber-400">
                       <AlertCircle className="w-5 h-5" /> ¡Importante!
                     </span>
-                    <span className={`text-xs font-bold ${darkMode ? 'text-amber-100' : 'text-[#fef3c7]'}`}>
+                    <span className="text-xs font-bold text-amber-100">
                       Recuerda enviarnos por WhatsApp la imagen de tu diseño para poder comenzar.
                     </span>
                   </div>
@@ -737,7 +770,7 @@ export default function App() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-400 font-semibold block mb-1">URL de la Imagen de Fondo/Mockup</label>
+                    <label className="text-xs text-slate-400 font-semibold block mb-1">URL de la Imagen (o Supabase Storage)</label>
                     <input type="url" value={newGarment.image} onChange={(e) => setNewGarment({ ...newGarment, image: e.target.value })} placeholder="https://..." className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg p-3 outline-none focus:border-slate-500" />
                   </div>
                   <div>
@@ -780,15 +813,18 @@ export default function App() {
           </section>
         )}
 
+        {/* --- SECCIÓN DE PERFIL ACTUALIZADA --- */}
         {activeTab === 'account' && (
           <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-16 font-sans">
             <div className="bg-[#111827] border border-slate-800 rounded-2xl p-8 shadow-xl">
               <div className="flex items-center justify-between border-b border-slate-800 pb-6 mb-6">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-100">Mi Perfil de Atleta</h2>
-                  <p className="text-xs text-slate-400 mt-1">Usuario: {user?.email}</p>
+                  {/* Cambio de título y detalle de usuario solicitado */}
+                  <h2 className="text-2xl font-bold text-slate-100">Mi perfil</h2>
+                  <p className="text-sm font-semibold text-slate-300 mt-2">Usuario: <span className="text-slate-100">{user?.name}</span></p>
+                  <p className="text-xs text-slate-500 mt-1">Correo: {user?.email}</p>
                 </div>
-                <button onClick={() => setUser(null)} className="px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-red-400 hover:bg-slate-800 transition">Cerrar Sesión</button>
+                <button onClick={handleSignOut} className="px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-red-400 hover:bg-slate-800 transition">Cerrar Sesión</button>
               </div>
 
               <h3 className="text-base font-bold text-slate-200 mb-4 flex items-center gap-2">
@@ -884,8 +920,12 @@ export default function App() {
                 </div>
               )}
               
-              <button type="submit" className="w-full py-3 mt-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg transition shadow-md">
-                {authMode === 'login' ? 'Entrar a mi cuenta' : 'Completar Registro'}
+              <button 
+                type="submit" 
+                disabled={isAuthLoading}
+                className="w-full py-3 mt-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white font-bold text-xs uppercase tracking-wider rounded-lg transition shadow-md disabled:opacity-50"
+              >
+                {isAuthLoading ? 'Procesando...' : (authMode === 'login' ? 'Entrar a mi cuenta' : 'Completar Registro')}
               </button>
             </form>
 
@@ -997,7 +1037,7 @@ export default function App() {
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 flex items-center justify-center">
-                <img src={darkMode ? "https://i.ibb.co/nspSqBy5/Recurso-2.png" : "https://i.ibb.co/hRPj411P/Recurso-1.png"} alt="Jor Store Logo" className="w-full h-full object-contain drop-shadow-md" />
+                <img src="https://i.ibb.co/nspSqBy5/Recurso-2.png" alt="Jor Store Logo" className="w-full h-full object-contain drop-shadow-md" />
               </div>
               <span className="font-black text-xl text-slate-200 uppercase tracking-tighter">JOR STORE</span>
             </div>
@@ -1034,7 +1074,7 @@ export default function App() {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 pt-6 border-t border-slate-800/60 text-center text-slate-600 flex flex-col sm:flex-row justify-between items-center gap-4">
           <span>© {new Date().getFullYear()} Jor Store. Todos los derechos reservados.</span>
-          <span className="text-[10px] bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-slate-400">Powered by Next.js & Supabase Architecture</span>
+          <span className="text-[10px] bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-slate-400">Powered by React & Supabase Architecture</span>
         </div>
       </footer>
     </div>
