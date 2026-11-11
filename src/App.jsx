@@ -5,26 +5,13 @@ import {
   ChevronUp, Send, AlertCircle, Info, Trash2, Settings, 
   Layers, PlusCircle, ToggleLeft, ToggleRight, Menu
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    export const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
-const supabase = {
-  auth: {
-    signUp: async () => ({ data: { user: { id: 'mock-id' } }, error: null }),
-    signInWithPassword: async () => ({ data: { user: { id: 'mock-id' } }, error: null }),
-    signOut: async () => ({ error: null }),
-  },
-  from: () => ({
-    insert: async () => ({ error: null }),
-    select: () => ({
-      eq: () => ({
-        single: async () => ({ data: { first_name: 'Usuario', last_name: 'Demo', city: 'Maracay', state: 'Aragua', phone: '000000' }, error: null })
-      })
-    })
-  })
-};
 
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+export const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
 // --- DATA & CONSTANTS ---
 const INITIAL_GARMENTS = [
   {
